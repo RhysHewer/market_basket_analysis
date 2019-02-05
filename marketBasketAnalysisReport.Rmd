@@ -1,0 +1,706 @@
+---
+output:
+  html_document:
+    code_folding: hide
+    number_sections: yes
+    theme: cosmo
+    toc: yes
+    toc_float: yes
+---
+<style type="text/css">
+body .main-container {
+  margin-left: 1%;
+  margin-right: 1%;
+  max-width: 1350px;
+}
+.jumbotron {
+    background-color: #86b0e0!important;
+    
+}
+</style>
+
+<div class="jumbotron">
+  <h1>Blackwell/Electronidex - Market Basket Analysis</h1>
+  <p>Rhys Hewer</p>
+</div>
+
+
+```{r message=FALSE} 
+#load libraries
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+library(RColorBrewer)
+library(tibble)
+library(arules)
+library(arulesViz)
+library(caret)
+library(readr)
+library(pdftools)
+library(stringr)
+library(gridExtra)
+library(kableExtra)
+library(treemap)
+```
+
+```{r message=FALSE, results = "hide", warning=FALSE}
+#load csv data
+transData <- read.transactions("C:/Users/rhysh/Google Drive/Data Science/Ubiqum/Project 2/Task 4/data/ElectronidexTransactions2017.csv", format = "basket", sep = ",")
+prodData <- read.csv("C:/Users/rhysh/Google Drive/Data Science/Ubiqum/Project 2/Task 4/data/ElectronidexTransactions2017.csv", header = FALSE)
+
+#Load type data
+load("C:/Users/rhysh/Google Drive/Data Science/Ubiqum/Project 2/Task 4/output/typeData.RDS") 
+
+#Load data - Blackwell products info
+blackData <- read.csv("C:/Users/rhysh/Google Drive/Data Science/Ubiqum/Project 2/Task 4/data/existingProductAttributes.csv")
+
+##Load Data - Blackwell demographics
+blackDemo <- read_csv2("C:/Users/rhysh/Google Drive/Data Science/Ubiqum/Project 2/Task 4/data/Blackwell_Demographic_Data.csv")
+colnames(blackDemo)[1] <- "instore"
+
+#Load Data - profit predictions Blackwell
+profPred <- read.csv("C:/Users/rhysh/Google Drive/Data Science/Ubiqum/Project 2/Task 4/data/BWNewProfitPredictions.csv")
+```
+
+# **Executive Summary**
+
+## Objective
+Blackwell Electronics is considering the acquisition of Electronidex, a start-up electronics online retailer. The analytics team have been asked to help the Board of Directors better understand the clientele that Electronidex currently is serving and if it would be an optimal partnership.
+
+Particular attention is to be paid to the following questions:
+
+* Would Blackwell benefit from selling any of Electronidex’s items?
+* Are there any interesting patterns or item relationships within Electronidex’s transactions?
+* If Blackwell does acquire Electronidex, do you have any recommendations for Blackwell?
+* Should Blackwell acquire Electronidex?
+
+
+## Method
+
+We were given 30 days of Electronidex's transactions and combined this with the output of our previous demographic and profitability analyses. From this data we performed a Market Basket Analysis to look for relationships between products and product types both within Electronidex and between them and Blackwell. 
+
+In addition we performed some basic summary analysis on both businesses to allow comparison.
+
+## Findings
+
+The key findings were:
+
+* Electronidex is a B2B/distribution organisation and their customer behaviour is markedly divergent from ours.
+* There is a negligble boosting effect between the products they stock and ours.
+* Their top-selling item is an iMac and we should investigate selling this.
+
+## Recommendations
+
+It is recommended to not purchase Electronidex both in respect of different customer patterns and a lack of product synergy but it would also represent a strategic move in the wrong direction.
+
+# **Would Blackwell benefit from selling any of Electronidex’s items?**
+
+## Approaches
+
+The analysis will first consider whether there are any Electronidex products which should be sold by Blackwell by comparing the product types between the companies.
+
+The second approach will be to see if within the shared product types there are particularly successful items sold by Electronidex which Blackwell should also be considering.
+
+### Product-Type Comparison
+
+The first approach taken to answer the question of whether Blackwell would benefit from selling any of Electronidex's products is to compare the products sold between the two companies. By doing this and, additionally, using the transaction data from Electronidex we can see whether there are any relationships between the shared products and the electronidex products which would suggest that Blackwell should stock products they currently do not.
+
+Ideally, the products would be compared on an item-for-item basis. As this is not available, the products will be compared on a product-type-for-product-type basis.
+
+The process to be used for this is as follows:
+
+* Collate the product type information of the Electronidex items.
+* Convert the transactional data from item to product type.
+* Explore positive associations between shared product types (product types stocked both by both Blackwell and Electronidex) and Electronidex-only products.
+* For Electronidex-only product types with positive relationships to shared product types, make recommendations about which of these Blackwell should sell.
+
+#### Generate Electronidex Product-Type Association Rules
+
+
+```{r warning=FALSE}
+### Loading PDF Elecronited product type data
+text <- pdf_text("C:/Users/rhysh/Google Drive/Data Science/Ubiqum/Project 2/Task 4/data/ElectronidexItems2017.pdf")
+
+text2 <- strsplit(text, "\n")
+text2 <- text2 %>% unlist(recursive = TRUE)
+
+text3 <- gsub("\r", "", text2)
+
+prod.list <- text3 %>% as.data.frame()
+
+##create product type lists
+#x = row numbers of items, y - object name
+listName <- function(x){
+        list.name <- prod.list[x,1] %>% as.character() %>% trimws("l")
+}
+
+laptop.list <- listName(2:11)
+desktop.list <- listName(13:21)
+monitor.list <- listName(23:32)
+mice.list <- listName(34:43)
+keyboard.list <- listName(45:53)
+mousekeyboard.list <- listName(55:63)
+compheadphones.list <- listName(64:74)
+activeheadphones.list <- listName(76:81)
+compcords.list <- listName(83:91)
+accessories.list <- listName(93:96)
+speakers.list <- listName(98:106)
+printers.list <- listName(108:112)
+printink.list <- listName(114:118)
+compstands.list <- listName(120:124)
+comptablets.list <- listName(126:130)
+extdrives.list <- listName(132:136)
+smarthome.list <- listName(138:142)
+
+##additional products added to lists
+laptop.list <- c(laptop.list, "Alienware Laptop", "Apple MacBook Pro", "Eluktronics Pro Gaming Laptop", "ASUS Chromebook")
+activeheadphones.list <- c(activeheadphones.list, "Panasonic On-Ear Stereo Headphones", "APIE Bluetooth Headphone", 
+                           "Otium Wireless Sports Bluetooth Headphone", "Philips Flexible Earhook Headphone")
+comptablets.list <- c(comptablets.list, "tabletlet", "tablet Pro")
+printink.list <- c(printink.list, "printer Toner")
+extdrives.list <- c(extdrives.list, "Slim extdrive")
+
+#string replacement lists
+prodReplace <- function(x,y){
+        list1 <- x %>% as.data.frame()
+        list1$name <- y
+        list2 <- list1$name
+        names(list2) <- list1$.
+        list2
+}
+
+laptop.replace <- prodReplace(laptop.list, "laptop")
+desktop.replace <- prodReplace(desktop.list, "desktop")
+monitor.replace <- prodReplace(monitor.list, "monitor")
+mice.replace <- prodReplace(mice.list, "mouse")
+keyboard.replace <- prodReplace(keyboard.list, "keyboard")
+mousekeyboard.replace <- prodReplace(mousekeyboard.list, "mousekeyboard")
+compheadphones.replace <- prodReplace(compheadphones.list, "compheadphones")
+activeheadphones.replace <- prodReplace(activeheadphones.list, "activeheadphones")
+compcords.replace <- prodReplace(compcords.list, "compcord")
+accessories.replace <- prodReplace(accessories.list, "accessories")
+speakers.replace <- prodReplace(speakers.list, "speaker")
+printers.replace <- prodReplace(printers.list, "printer")
+printink.replace <- prodReplace(printink.list, "printink")
+compstands.replace <- prodReplace(compstands.list, "compstand")
+comptablets.replace <- prodReplace(comptablets.list, "tablet")
+extdrives.replace <- prodReplace(extdrives.list, "extdrive")
+smarthome.replace <- prodReplace(smarthome.list, "smarthome")
+
+#String replacement function
+stringReplace <- function(z){
+        inList <- z
+        repLace <- prodData
+        repLace <- sapply(repLace, function(x) str_replace_all(x, inList))
+        data.frame(repLace)
+}
+
+productList <- c(laptop.replace, desktop.replace, monitor.replace, mice.replace, keyboard.replace, mousekeyboard.replace,
+                 compheadphones.replace, activeheadphones.replace, compcords.replace, accessories.replace, speakers.replace,
+                 printers.replace, printink.replace, compstands.replace, comptablets.replace, extdrives.replace, smarthome.replace)
+
+typePrep <- stringReplace(productList)
+
+#not all products were included on product type list
+# "Alienware Laptop", "Apple MacBook Pro", "Eluktronics Pro Gaming Laptop", "Panasonic On-Ear Stereo Headphones", 
+# "tabletlet", "APIE Bluetooth Headphone", "ASUS Chromebook", "Otium Wireless Sports Bluetooth Headphone",  "printer Toner" 
+# "Philips Flexible Earhook Headphone", "Slim extdrive", "tablet Pro"  - added to relevant product replacement lists    
+
+
+#CSV creation/re-import
+write.table(typePrep, file = "C:/Users/rhysh/Google Drive/Data Science/Ubiqum/Project 2/Task 4/output/typePrep.csv", sep=",", row.names = FALSE, col.names = FALSE)
+typeData <- read.transactions("C:/Users/rhysh/Google Drive/Data Science/Ubiqum/Project 2/Task 4/output/typePrep.csv", format = "basket", sep=",")
+
+
+```
+
+
+```{r message=FALSE, results = "hide"}
+### Generate association rules and convert to dataframe for manipulation
+basketRulesType <- apriori(typeData, parameter = list(supp = 0.01, conf = 0.1, minlen = 2))
+basketFrameType <- data.frame(
+        lhs = labels(lhs(basketRulesType)),
+        rhs = labels(rhs(basketRulesType)), 
+        basketRulesType@quality)
+
+```
+
+The association rules are generated for the whole Electronidex product type set. Low barriers are set for the creation of the rules and the output is converted to a dataframe for ease of manipulation.
+
+
+There are two directions to explore within these transactions. These are:
+
+* Shared product types which are associated with purchases of Electronidex-only product types
+* Electronidex-only product types which are associated with purchases of shared product types
+
+These will be investigated in-turn.
+
+#### Shared product types which are associated with purchases of Electronidex-only product types
+
+```{r}
+##Filter based on LHS shared products and support/confidence/lift metrics summarise these
+sharedProducts <- ("accessories|monitor|laptop|desktop|printer|printink|tablet")
+notSharedProducts <- ("mouse|keyboard|mousekeyboard|compheadphones|activeheadphones|compcord|speaker|compstand|
+                      extdrive|smarthome")
+
+basketLeft <- basketFrameType %>% filter(!grepl(notSharedProducts, lhs)) %>%
+        filter(support > 0.05, confidence > 0.6, lift > 1)
+
+basketLeftAvg <- basketLeft %>% group_by(rhs) %>%
+        summarise(avgSupport = mean(support), avgConfidence = mean(confidence), avgLift = mean(lift))
+
+kable(basketLeftAvg) %>%
+        kable_styling(bootstrap_options = "striped", full_width = F, position = "left")
+```
+
+The association rules are generated with the following limits:
+
+* Support > 0.05: This represents itemsets that occur more than 5% of the time
+* Confidence > 0.6: This represents the RHS items occuring at least 60% of the time the LHS occur
+* Lift > 1: This ensures that the itemsets are not independent and that the relationship is positive (each side of the itemset increases the chance of the other side occuring)
+
+The association rules were then filtered so that rules where only shared product types were contained within the LHS remained. The RHS product types were summarised to give a general picture of the positive association between the shared products and the product types with which they have a positive relationship.
+
+We see that within the limits we set there are no Electronidex-only product types which are sufficiently positively associated with the shared product types, and by extension, the Blackwell product types.
+
+As such, there are no Electronidex-only products which would be useful to cross-sell with our current Blackwell products.
+
+#### Electronidex-only product types which are associated with purchases of shared product types
+
+```{r}
+basketRight <- basketFrameType %>% filter(!grepl(notSharedProducts, rhs)) %>%
+        filter(support > 0.05, confidence > 0.6, lift > 1)
+```
+
+The association rules are generated with the following limits:
+
+* Support > 0.05: This represents itemsets that occur more than 5% of the time
+* Confidence > 0.6: This represents the RHS items occuring at least 60% of the time the LHS occur
+* Lift > 1: This ensures that the itemsets are not independent and that the relationship is positive (each side of the itemset increases the chance of the other side occuring)
+
+The association rules were then filtered so that rules where only shared product types were contained within the RHS remained.
+
+The following plot was produced:
+
+```{r}
+g5 <- ggplot(basketRight, aes(rhs, lhs)) +
+        geom_count(aes(size = confidence, colour = support)) +
+        scale_colour_gradient(low = "skyblue", high = "darkblue") +
+        theme_bw() +
+        ylab("LHS Itemset") + 
+        xlab("Shared Product Type") + 
+        ggtitle("Association Rules: RHS shared products")
+g5
+
+```
+
+At first glance it seems that there are a number of potentially interesting associations to explore. However, when a closer look is taken, some questions regarding customer behaviour arise.
+
+By looking more in-depth at fewer rules these questions become more apparent.
+
+```{r}
+basketRightFocus <- basketRight %>% filter(support > 0.075, confidence > 0.75, lift > 1.2)
+
+kable(basketRightFocus) %>%
+        kable_styling(bootstrap_options = "striped", full_width = F, position = "left")
+```
+
+The above data are generated from the most positive association rules, with metrics of:
+
+* Support > 0.075: This represents itemsets that occur more than 7.5% of the time
+* Confidence > 0.75: This represents the RHS items occuring at least 75% of the time the LHS occur
+* Lift > 1.2: This ensures that the itemsets are not independent and that the relationship is significantly positive (each side of the itemset increases the chance of the other side occuring)
+
+All the transactions have a positive association with a desktop being purchased. What is noteworthy, however, is that in 50% of the listed transactions, a laptop is also purchased. In consumer purchases, desktops and laptops are infrequently purchased together. Electronidex sales patterns are more indicative of a business-to-business wholesaler and, as such, their utility in comparing to Blackwell's business-to-consumer model is diminished. 
+
+The directionality of the association is also a concern. Whilst the rules are correlative rather than causative, they do seem to suggest that the less expensive peripherals have a positive impact on whether a desktop is purchased and also that buying a laptop (a product which usually replaces a desktop) has a positive impact on whether a desktop is purchased.
+
+One would usually expect the purchase of the more expensive primary items to drive the purchase of the less expensive secondary items - Rarely have I purchased a mouse and thought 'I probably need a desktop with that' - but this is not the pattern here. Also, if there was this type of relationship, one would expect it to be reciprocated when the desktop is on the LHS of the itemset. As we saw, previously, this was not the case.
+
+### Electronidex Products within Shared product-types group
+
+Blackwell and Electronidex share the following product types:
+
+* Accessories
+* Monitor
+* Laptop
+* Desktop
+* Printers
+* Printer Ink
+* Computer Tablets
+
+The second approach to answering the question of whether Blackwell would benefit from selling any of Electronidex's items is to look at which of Electronidex's products within the shared categories are most successful and to consider stocking these, if we do not do so already.
+
+```{r}
+#Per shared product type (x - product list, y = product name)
+freq <- itemFrequency(transData) %>% as.data.frame %>% rownames_to_column()
+colnames(freq) <- c("rowNames", "support")
+freqShared <- freq
+
+addType <- function(x,y){
+is.x <- freqShared$rowNames %in% x
+freqShared$prodType[is.x] <- y
+freqShared
+}
+
+freqShared <- addType(accessories.list, "accessories")
+freqShared <- addType(monitor.list, "monitor")
+freqShared <- addType(desktop.list, "desktop")
+freqShared <- addType(printers.list, "printer")
+freqShared <- addType(printink.list, "printink")
+freqShared <- addType(comptablets.list, "comptablet")
+
+
+freqShared.filter <- freqShared %>% na.omit() %>% group_by(prodType) %>%
+        top_n(n = 1, wt = support) %>% arrange(prodType)
+
+kable(freqShared.filter) %>%
+        kable_styling(bootstrap_options = "striped", full_width = F, position = "left")
+```
+
+Above we see the most frequently occurring products from within each shared product type. 
+
+Blackwell is already considering selling an Apple tablet - based on frequency of presence in the Electronidex transactions the iPad Pro should be considered for this tablet.
+Blackwell already sells the ViewSonic monitor.
+The other most-frequent items should be given consideration as to whether these would add value to Blackwell. With additional information we could use our profitability prodictive algorithm to give further analysis.
+
+The most interesting result, however, is that of the iMac. It occurs in > 25% of Electronidex transactions suggesting it is a hugely popular item. We should give strong consideration to stocking this.
+
+## Conclusion: Would Blackwell benefit from selling any of Electronidex's items?
+
+### Comparative Approach
+
+Reviewing the associations generated by the shared products being on the LHS we saw that only the products that we already sell have a positive association with the shared products itemsets. This suggests that we are not missing out on product types, currently being sold by Electronidex, that would likely sell alongside the exisiting shared product types sold by Blackwell.
+
+We see that there are items that seem to have a positive impact on the sales of product types currently stocked by Blackwell but that these patterns are questionable due to the difference in customer behaviour between our businesses.
+
+I would recommend a small trial based on the top-frequency products within the product types most associated with a positive impact current Blackwell products.
+
+Based on our focussed dataset, these product types are:
+
+* Mouse & Keyboard combination
+* Active Headphones
+* Keyboard
+* Mouse
+
+We do not have information about sales volume, price or profitablility for the Electronidex products. Frequency of appearance in the basket has been used as a proxy for these.
+
+The recommended products are:
+```{r}
+## Most frequent Electronidex products - Mouse & Keyboard combination/Active Headphones/Keyboard/Mouse
+
+
+is.keyboard <- freq$rowNames %in% keyboard.list
+freq$prodType[is.keyboard] <- "keyboard"
+
+is.mouse <- freq$rowNames %in% mice.list
+freq$prodType[is.mouse] <- "mouse"
+
+is.mousekeyboard <- freq$rowNames %in% mousekeyboard.list
+freq$prodType[is.mousekeyboard] <- "mousekeyboard"
+
+is.activeheadphones <- freq$rowNames %in% activeheadphones.list
+freq$prodType[is.activeheadphones] <- "activeheadphones"
+
+#Blackwell don't stock apple desktops or laptops (only smartphone) so remove apple peripherals
+freq <- freq %>% filter(!str_detect(rowNames, "Apple"))
+
+freq.filter <- freq %>% na.omit() %>% group_by(prodType) %>%
+        top_n(n = 2, wt = support) %>% arrange(prodType)
+
+kable(freq.filter) %>%
+        kable_styling(bootstrap_options = "striped", full_width = F, position = "left")
+```
+
+### Shared Product Types Approach:
+
+We should consider selling the following items, with particular attention to the iMac.
+```{r}
+kable(freqShared.filter) %>%
+        kable_styling(bootstrap_options = "striped", full_width = F, position = "left")
+```
+
+
+# **Are there any interesting patterns or item relationships within Electronidex’s transactions?**
+
+## Electronidex Transaction Data: Frequency Patterns and Summary
+```{r}
+#general EDA - high numbers of many-item transactions, mean of 4.83
+summary(transData)
+
+#item frequency - nothing interesting here
+transFreq <- itemFrequency(transData) %>% as.data.frame %>% rownames_to_column()
+colnames(transFreq) <- c("rowNames", "support")
+transFreq.filter <- transFreq %>% arrange(desc(support)) %>% head(10) 
+
+kable(transFreq.filter) %>%
+        kable_styling(bootstrap_options = "striped", full_width = F, position = "left")
+```
+
+Reviewing the summary of the transactions there is nothing that is particularly striking. There are a couple of interesting patterns to note, however:
+
+* There is a reasonably large number of multiple-item transactions
+* iMac has the largest frequency (support) by a significant margin.
+
+## Electronidex Transaction Data: Exploring Positive Relationships
+```{r message=FALSE, results = "hide"}
+#rules creation
+basketRulesItem <- apriori(transData, parameter = list(supp = 0.002, conf = 0.3, minlen = 2))
+
+itemFrame <- data.frame(
+                lhs = labels(lhs(basketRulesItem)),
+                rhs = labels(rhs(basketRulesItem)), 
+                basketRulesItem@quality)
+```
+```{r}
+#good metrics
+itemFramePos <- itemFrame %>% filter(support > 0.025, confidence > 0.40, lift > 1 )
+
+kable(itemFramePos) %>%
+        kable_styling(bootstrap_options = "striped", full_width = F, position = "left")
+```
+
+Creating the association rules and examining itemsets with the most positive association rules, an interesting picture does begin to emerge:
+
+* iMac is positively associated with monitors, even though it has a built-in display
+* There are multiple cross-platform baskets (Apple v Windows) which is unusual as consumers are usually committed to one platform
+* This is a pattern more reflective of a business-to-business organisation than a business-to-consumer one.
+
+# **If Blackwell does acquire Electronidex, do you have any recommendations for Blackwell?**
+
+Should Blackwell purchase Electronidex, I would recommend that they investigate a few things:
+
+* Acquire additional data to allow us to make more informed decisions
+* Review item transaction frequency and consider removing the lowest frequency items, particularly if associated with lift of less than 1. 
+* Remove items which have a lift of <1 in respect of high-value items (e.g. RHS = Desktops/Laptops/Monitors, low lift)
+* Cross-selling through recommendation engine.
+* Sales recommendation for iMac-associated products.
+
+
+The assumptions that I am using in making these recommendations are:
+
+* Support is a proxy for sales volume (transactional data removes numbers of items purchased)
+* High-value, high-profit items are Desktops, Laptops & Monitors
+
+## Low Frequency Items
+```{r}
+#item frequency low
+transFreq.low <- transFreq %>% arrange(desc(support)) %>% tail(10) 
+
+kable(transFreq.low) %>%
+        kable_styling(bootstrap_options = "striped", full_width = F, position = "left")
+```
+
+The lowest frequency items are shown above. They are not what I would expect to be the high-profit items. I would recommend that if Electronidex is acquired, these type of products are examined to see if they are making a profit and whether the numbers sold justify their being stocked.
+
+
+## High-value items, low lift items
+```{r}
+#low support low lift - none
+itemFrameLow <- itemFrame %>% filter(lift < 1 )
+itemFrameLow
+```
+
+There are no itemsets that occur frequently, with a strong association and with a lift of less than one. This means that there are no items 'dragging' on the high-value item sales.
+
+## Cross-Selling
+```{r}
+#Recommendation Engine examples
+recEng <- itemFrame %>% filter(grepl("iMac,Logitech MK550 Wireless Wave Keyboard and Mouse Combo", itemFrame$lhs))
+
+kable(recEng) %>%
+        kable_styling(bootstrap_options = "striped", full_width = F, position = "left")
+```
+
+I would advise that we use the transaction data to install a recommendation engine online. Using the above example we can understand how this could work.
+
+If a customer was purchasing an iMac and a Logitech MK550 Wireless Wave Keyboard and Mouse Combo we could suggest the RHS items as potential purchases. We see that the RHS items occur between 32%-66% when the LHS items are present and that the lift suggests that there is a significant positive association betweeen the purchases of the LHS and RHS.
+
+## Sales Recommendations
+
+```{r}
+#iMac LHS sales items RHS 
+imacLHS <- itemFrame %>% filter(lhs == "{iMac}")
+
+macBasket <- apriori(transData, parameter = list(supp = 0.001, conf = 0.1, minlen = 2), 
+                     appearance = list (default="rhs",lhs="iMac"), control = list (verbose=F))
+
+macFrame <- data.frame(
+        lhs = labels(lhs(macBasket)),
+        rhs = labels(rhs(macBasket)), 
+        macBasket@quality)
+
+macSale <- macFrame %>% filter(confidence > 0.2, lift > 1)
+
+kable(macSale) %>%
+        kable_styling(bootstrap_options = "striped", full_width = F, position = "left")
+```
+
+The iMac is the best-selling Electronidex product. In order to capitalise on it's success, I would recommend that we use the iMac to try to drive sales of associated products by offering a sale on these.
+
+In the above examples, we see items on the RHS which are driven by the iMac. In all cases, we find these itemsets between 5-8% of the transactions, that these items are found in iMac baskets between 20-30% of the time and that there is a positive association. 
+
+By offering a sale on the associated items, it is hoped that those customers who are purchasing an iMac would be marginally more inclined to also purchase the associated item, thus increasing sales.
+
+# **Should Blackwell acquire Electronidex?**
+
+
+Before making a recommendation as to whether to purchase Electronidex I think it would be beneficial to give an overview of both companies.
+
+## Blackwell Electronics
+
+Blackwell Electronics is a successful consumer electronics retailer with over 30 stores in the southeastern United States and who last year launched an eCommerce website.
+
+### Sales & Profit
+```{r}
+blackData <- blackData %>% filter(Product.Type != "Extended Warranty") %>% 
+        mutate(profit = (Volume * Price * Profit.margin)/10^3, unitProfit = Price * Profit.margin)
+
+
+blackProfit <- blackData %>% group_by(Product.Type) %>%
+        summarise(absProfit = sum(profit), unitProfit = mean(unitProfit), volume = sum(Volume), 
+                  meanMargin = mean(Profit.margin), avgPrice = mean(Price))
+
+
+treemap(blackProfit, index = "Product.Type", vSize = "volume", title = "Blackwell Sales Volume by Product Type")
+treemap(blackProfit, index = "Product.Type", vSize = "absProfit", title = "Blackwell Profit by Product Type")
+```
+
+We see that in terms of sales volume, Accessories and Game Consoles make up the majority of Blackwell's Products. Looking at the profit, however, we see that it is Games Consoles and Displays that make up a substantial part of Blackwell's profits.
+
+### Transaction Location
+
+```{r}
+#Blackwell instore v online 
+onlinePurch <- blackDemo %>% group_by(instore) %>%
+        summarise(count = n())
+onlinePurch <- onlinePurch %>% mutate(percent = (count/sum(onlinePurch$count))*100)
+onlinePurch$instore[onlinePurch$instore == 0] <- "Online"
+onlinePurch$instore[onlinePurch$instore == 1] <- "In Store"
+
+g6 <- ggplot(onlinePurch, aes(instore, percent)) +
+        geom_col(fill = "#31913c") +
+        theme_bw() +
+        ylab("% Transactions") + 
+        xlab("Purchase Location") + 
+        ggtitle("Blackwell: Transaction Location") +
+        geom_text(aes(label = percent %>% round(0)), vjust = -0.3)
+g6
+```
+
+We also see that whilst the majority of Blackwell transactions take place online, there is a sizeable proportion that take place in-store.
+
+### Items per Transaction
+```{r}
+#Blackwell items per purchase
+numItems <- blackDemo %>% group_by(items) %>%
+        summarise(num_items = n())
+numItems <- numItems %>% mutate(percent = (num_items/sum(numItems$num_items))*100)
+
+g7 <- ggplot(numItems, aes(items, percent)) +
+        geom_col(fill = "#5c8cdb") +
+        theme_bw() +
+        ylab("% Transactions") + 
+        xlab("Number of Items") + 
+        ggtitle("Blackwell: Number of Items distribution")
+g7
+```
+
+Looking at the distribution of the number of items per purchase we see that most transactions involve 2-7 items with no transactions exceeding 8 items.
+
+### Expected Profitability
+
+```{r}
+kable(profPred) %>%
+        kable_styling(bootstrap_options = "striped", full_width = F, position = "left")
+```
+
+Finally, reviewing the items with the top 5 expected profitability, we see Tablets, PCs, Netbooks and Games Consoles.
+
+## Electronidex
+
+Electronidex is a start-up electronics online retailer.
+
+### Estimated Sales Volume
+```{r}
+electroProducts <- itemFrequency(typeData) %>% as.data.frame() %>% rownames_to_column()
+names(electroProducts) <- c("ProductType", "Support")
+
+
+treemap(electroProducts, index = "ProductType", vSize = "Support", title = "Electronidex Sales Volume (est.) by Product Type")
+```
+
+Using the product-type frequency we can estimate a general picture of the type of products sole by Electronidex and the approximate sales volume.
+
+We see that Desktops, Laptops and Monitors form a large portion of their business.
+
+### Estimated Items per Transaction
+```{r}
+#Electronidex items per purchase
+sizeTrans <- size(transData)
+transTable <- table(sizeTrans) %>% as.data.frame()
+transTable <- transTable %>% mutate(percent = (Freq/sum(transTable$Freq))*100)
+
+g8 <- ggplot(transTable, aes(sizeTrans, percent)) +
+        geom_col(fill = "#519b3b") +
+        theme_bw() +
+        ylab("% Transactions") + 
+        xlab("Number of Items") + 
+        ggtitle("Electronidex: Number of Items distribution")
+g8
+```
+
+As we only have transaction information, not sales figures, we can only make some general conclusions about numbers of items per transaction. Using the unsatisfactory metric of 1 item sold if the item is present within the transaction we can still draw somw general conclusions.
+
+Looking at the distribution of the estimated number of items per purchase we see that whilst almost 80% of the sales conist of between 1-8 items, 20% exceed this. As we do not have the sales figures, I believe that this underestimates the items-per-transaction figure. The presence of a large number of high-item-number transactions reinforces the picture of Electronidex as a business-to-business organisation.
+
+## Organisational Conclusions
+
+Blackwell Electronics is a consumer electronics retailer with online and in-store presence. Blackwell services mostly small-basket transactions and generates profitability through displays and games consoles. Future profitable items are expected to be tablets, PCs, netbooks and games consoles.
+
+Electronidex is an online-only business-to-business startup, potentially a distributor, who service larger item-number baskets. Their top selling product types are desktops, laptops and monitors.
+
+## Blackwell SWOT Analysis
+
+![](C:/Users/rhysh/Google Drive/Data Science/Ubiqum/Project 2/Task 4/output/swot.png)
+
+Blackwells biggest problems stem from being a small retailer squeezed between large retailers and small, niche retailers and having a limited and generic product offering.
+
+To combat this, Blackwell should leverage it's strengths and look to move into newer markets using data analytics and mobile commerce as key tools to do so.
+
+My opinion is that the vision for Blackwell should be one of an organisation focussing on a younger consumer base (13-40), stocking the newest products and using and expanding its analytics capabilities to be more nimble in the marketplace. This would allow us to build on our already profitable products of games consoles and monitors.
+
+Electronidex is a distribution/B2B organisation and acquiring this could give us economies of scale and allow us to expand deeper into the supply chain side of the business. Choosing to go large - in competition with the retail giants - versus to go niche would not be in line with where I think our strategic goals should be. Our analysis has also cast doubt that any synergy would be delivered in respect of mutually-reinforcing product types.
+
+My recommendation is that Blackwell should not aqcuire Electronidex.
+
+
+# **Conclusion** 
+
+The key findings were:
+
+* Electronidex is a B2B/distribution organisation and their customer behaviour is markedly divergent from ours.
+* There is a negligble boosting effect between the products they stock and ours.
+* Their top-selling item is an iMac and we should investigate selling this.
+There are opportunities for us to experiment with stocking some of their products to explore if they have an impact on item sales.
+* Should we acquire Electronidex there are a nnumber of strategies we could take to try to fine-tune sales.
+
+## Acquisition Recommendation
+
+My recommendation is that Blackwell should not aqcuire Electronidex.
+
+## Analysis Recommendations
+
+To allow a more meaningful analysis based on actual numbers of items and profitability, more data would be needed from Electronidex. 
+
+The data we have available for the analysis was:
+
+* Electronidex transactions -  days
+* Blackwell demographic information
+* Blackwell product-type sales information
+
+To allow us to perform a more in-depth analysis of a simmilar nature in the future I would recommend that we supplement this data with:
+
+* Electronidex product sales information (profit margin, sales figures, price)
+* Specific Blackwell item sales information (name/brand of product) for a listed period (month/year)
+* Blackwell transaction data for a listed period (month/year)
